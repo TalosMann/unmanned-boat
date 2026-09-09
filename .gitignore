@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.ipynb_checkpoints/
+
+# Unrelated coursework leftovers, not part of this project
+Untitled.ipynb
+images/
+
+# Local scratch / large media not meant for the repo
+*.mp4
+*.mov
