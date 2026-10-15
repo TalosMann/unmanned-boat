@@ -38,36 +38,31 @@ def load_labels(path):
     return labels
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Evaluate red-ball detection against labeled ground truth.")
-    parser.add_argument("video")
-    parser.add_argument("labels_csv")
-    parser.add_argument("--show", action="store_true", help="Display each labeled frame with GT (green) vs detection (red)")
-    parser.add_argument("--dump-worst", type=int, default=0, metavar="N",
-                         help="Save annotated images for the N highest-error frames, plus all false positives")
-    args = parser.parse_args()
-
-    labels = load_labels(args.labels_csv)
-    if not labels:
-        print(f"[eval] No labels found in {args.labels_csv}")
-        return
-
-    cap = cv2.VideoCapture(args.video)
+def run_detection(video_path, labels, want_annotated=False, show=False, record_all_frames=False):
+    """Runs vision.py's red-ball detector against a video, scoring the
+    labeled frames. Returns (rows, all_frames):
+      - rows: one entry per LABELED frame (existing behavior — used for
+        hit-rate/error-vs-ground-truth metrics, Experiment 2).
+      - all_frames: one entry per EVERY frame processed (only populated if
+        record_all_frames=True) — {"frame_idx": i, "detected": bool} for
+        each, used by the onset-latency measurement (Experiment 1B), which
+        needs to find the exact first frame detection turns on after a
+        ground-truth appearance event, not just the sparsely labeled ones.
+    Shared by the CLI below and by other scripts (multi-condition
+    comparison for Experiment 2, onset latency for Experiment 1B)."""
+    cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"[eval] Could not open video: {args.video}")
-        return
+        raise RuntimeError(f"Could not open video: {video_path}")
 
     red = _SingleBallTracker(
-        hsv_ranges=[
-            (config.RED_HSV_LOWER1, config.RED_HSV_UPPER1),
-            (config.RED_HSV_LOWER2, config.RED_HSV_UPPER2),
-        ],
+        hsv_ranges=list(config.RED_HSV_RANGES),
         min_radius_px=config.MIN_BALL_RADIUS_PX,
         min_color_match_fraction=config.MIN_COLOR_MATCH_FRACTION,
     )
 
     last_gt = None  # (frame_idx, x, y) of previous *visible* label, for speed calc
     rows = []
+    all_frames = []
 
     frame_idx = 0
     while True:
@@ -76,6 +71,9 @@ def main():
             break
 
         result = red.detect(frame)
+
+        if record_all_frames:
+            all_frames.append({"frame_idx": frame_idx, "detected": result["ball_found"]})
 
         if frame_idx in labels:
             gt = labels[frame_idx]
@@ -93,7 +91,7 @@ def main():
                 error_px = math.hypot(cx - gt["x"], cy - gt["y"])
 
             annotated = None
-            if args.show or args.dump_worst:
+            if want_annotated or show:
                 annotated = frame.copy()
                 if gt["visible"]:
                     cv2.drawMarker(annotated, (int(gt["x"]), int(gt["y"])), (0, 255, 0),
@@ -113,7 +111,7 @@ def main():
                 "annotated": annotated,
             })
 
-            if args.show:
+            if show:
                 cv2.imshow("eval — green=labeled, red=detected", annotated)
                 cv2.waitKey(0)
 
@@ -123,15 +121,18 @@ def main():
         frame_idx += 1
 
     cap.release()
-    if args.show:
+    if show:
         cv2.destroyAllWindows()
         for _ in range(4):
             cv2.waitKey(1)
 
-    _report(rows, args.video, args.dump_worst)
+    return rows, all_frames
 
 
-def _report(rows, video_path, dump_worst):
+def compute_metrics(rows):
+    """Reduces run_detection()'s per-frame rows to the summary numbers used
+    both by the CLI's printed report and by the Experiment 2 condition
+    comparison table: hit rate, false-positive rate, and mean pixel error."""
     visible_rows = [r for r in rows if r["gt_visible"]]
     not_visible_rows = [r for r in rows if not r["gt_visible"]]
 
@@ -139,20 +140,64 @@ def _report(rows, video_path, dump_worst):
     misses = [r for r in visible_rows if not r["detected"]]
     false_positives = [r for r in not_visible_rows if r["detected"]]
 
-    print(f"\n[eval] Labeled frames: {len(rows)} "
-          f"({len(visible_rows)} ball-visible, {len(not_visible_rows)} not-visible)")
-    print(f"[eval] Hit rate on visible frames: {len(hits)}/{len(visible_rows)} "
-          f"({100 * len(hits) / max(1, len(visible_rows)):.0f}%)")
-    if false_positives:
-        print(f"[eval] False positives on not-visible frames: {len(false_positives)}/{len(not_visible_rows)}")
-
     errors = [r["error_px"] for r in hits if r["error_px"] is not None]
-    if errors:
-        errors_sorted = sorted(errors)
-        mean_err = sum(errors) / len(errors)
-        median_err = errors_sorted[len(errors_sorted) // 2]
-        print(f"[eval] Position error on hits: mean={mean_err:.1f}px  median={median_err:.1f}px  "
-              f"max={max(errors):.1f}px")
+
+    return {
+        "n_labeled": len(rows),
+        "n_visible": len(visible_rows),
+        "n_not_visible": len(not_visible_rows),
+        "n_hits": len(hits),
+        "n_misses": len(misses),
+        "n_false_positives": len(false_positives),
+        "hit_rate_pct": 100 * len(hits) / max(1, len(visible_rows)),
+        "false_positive_rate_pct": 100 * len(false_positives) / max(1, len(not_visible_rows)),
+        "mean_error_px": (sum(errors) / len(errors)) if errors else None,
+        "median_error_px": (sorted(errors)[len(errors) // 2]) if errors else None,
+        "max_error_px": max(errors) if errors else None,
+        "hits": hits,
+        "misses": misses,
+        "false_positives": false_positives,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Evaluate red-ball detection against labeled ground truth.")
+    parser.add_argument("video")
+    parser.add_argument("labels_csv")
+    parser.add_argument("--show", action="store_true", help="Display each labeled frame with GT (green) vs detection (red)")
+    parser.add_argument("--dump-worst", type=int, default=0, metavar="N",
+                         help="Save annotated images for the N highest-error frames, plus all false positives")
+    args = parser.parse_args()
+
+    labels = load_labels(args.labels_csv)
+    if not labels:
+        print(f"[eval] No labels found in {args.labels_csv}")
+        return
+
+    try:
+        rows, _ = run_detection(args.video, labels, want_annotated=bool(args.dump_worst), show=args.show)
+    except RuntimeError as e:
+        print(f"[eval] {e}")
+        return
+
+    _report(rows, args.video, args.dump_worst)
+
+
+def _report(rows, video_path, dump_worst):
+    metrics = compute_metrics(rows)
+    visible_rows = [r for r in rows if r["gt_visible"]]
+    hits, misses, false_positives = metrics["hits"], metrics["misses"], metrics["false_positives"]
+
+    print(f"\n[eval] Labeled frames: {metrics['n_labeled']} "
+          f"({metrics['n_visible']} ball-visible, {metrics['n_not_visible']} not-visible)")
+    print(f"[eval] Hit rate on visible frames: {metrics['n_hits']}/{metrics['n_visible']} "
+          f"({metrics['hit_rate_pct']:.0f}%)")
+    if false_positives:
+        print(f"[eval] False positives on not-visible frames: {metrics['n_false_positives']}/{metrics['n_not_visible']}")
+
+    if metrics["mean_error_px"] is not None:
+        print(f"[eval] Position error on hits: mean={metrics['mean_error_px']:.1f}px  "
+              f"median={metrics['median_error_px']:.1f}px  max={metrics['max_error_px']:.1f}px")
 
     # Bucket by speed to see if errors/misses cluster at higher speeds
     speed_rows = [r for r in visible_rows if r["speed_px_per_frame"] is not None]

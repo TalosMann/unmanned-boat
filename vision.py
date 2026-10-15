@@ -152,14 +152,83 @@ class _SingleBallTracker:
         return result
 
 
+class _ColorBlobDetector:
+    """Finds the largest contiguous blob of a given color — used for the
+    goal structures, which are large, irregular, and mostly stationary
+    (unlike the ball), so Hough Circle fitting doesn't apply. Reports
+    direction and apparent size rather than a tight bounding circle, and
+    runs cold-start every frame (no CSRT) since goals aren't expected to
+    need frame-to-frame tracking smoothing the way a moving ball does."""
+
+    def __init__(self, hsv_ranges, min_area_px):
+        self.hsv_ranges = hsv_ranges
+        self.min_area_px = min_area_px
+
+    def _color_mask(self, frame):
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = None
+        for lower, upper in self.hsv_ranges:
+            part = cv2.inRange(hsv, lower, upper)
+            mask = part if mask is None else cv2.bitwise_or(mask, part)
+        return mask
+
+    def detect(self, frame):
+        h_frame, w_frame = frame.shape[:2]
+        result = {"found": False, "x_offset": 0.0, "area_px": 0, "bbox": None}
+
+        mask = self._color_mask(frame)
+        mask = cv2.erode(mask, None, iterations=2)
+        mask = cv2.dilate(mask, None, iterations=2)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return result
+
+        largest = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(largest)
+        if area < self.min_area_px:
+            return result
+
+        x, y, w, h = cv2.boundingRect(largest)
+        cx = x + w / 2
+        result["found"] = True
+        result["x_offset"] = (cx - w_frame / 2) / (w_frame / 2)
+        result["area_px"] = area
+        result["bbox"] = (x, y, w, h)
+        return result
+
+
+class GoalVision:
+    """Detects the red and blue goals independently, same pattern as
+    BallVision detecting red/colored balls. Which one is the actual
+    scoring target is a decision for fsm.py (driven by the remote's
+    goal-select switch), not something vision.py decides."""
+
+    def __init__(self, config):
+        self.config = config
+        self._red = _ColorBlobDetector(
+            hsv_ranges=list(config.RED_GOAL_HSV_RANGES),
+            min_area_px=config.MIN_GOAL_AREA_PX,
+        )
+        self._blue = _ColorBlobDetector(
+            hsv_ranges=list(config.BLUE_GOAL_HSV_RANGES),
+            min_area_px=config.MIN_GOAL_AREA_PX,
+        )
+
+    def detect(self, frame):
+        """Returns {"red": {...}, "blue": {...}}, each shaped
+        {"found": bool, "x_offset": float, "area_px": float, "bbox": (x,y,w,h) or None}"""
+        return {
+            "red": self._red.detect(frame),
+            "blue": self._blue.detect(frame),
+        }
+
+
 class BallVision:
     def __init__(self, config):
         self.config = config
         self._red = _SingleBallTracker(
-            hsv_ranges=[
-                (config.RED_HSV_LOWER1, config.RED_HSV_UPPER1),
-                (config.RED_HSV_LOWER2, config.RED_HSV_UPPER2),
-            ],
+            hsv_ranges=list(config.RED_HSV_RANGES),
             min_radius_px=config.MIN_BALL_RADIUS_PX,
             min_color_match_fraction=config.MIN_COLOR_MATCH_FRACTION,
         )

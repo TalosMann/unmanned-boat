@@ -28,15 +28,23 @@ not buried in logic files.
 """
 
 # --- HSV thresholds (tune these on-site against actual river lighting) ---
-# Derived from auto_calibrate_hsv.py against video_3/video_5's labeled
-# ground truth (indoor basketball footage, NOT the Pi's camera/lighting —
-# treat as a starting point and re-calibrate against real Pi-camera/water
-# footage once available). Red wraps around the HSV hue circle (0 and 180
-# are both "red"), so it needs two ranges OR'd together.
-RED_HSV_LOWER1 = (0, 165, 109)
-RED_HSV_UPPER1 = (9, 255, 255)
-RED_HSV_LOWER2 = (170, 165, 109)
-RED_HSV_UPPER2 = (180, 255, 255)
+# List of (lower, upper) HSV bound pairs, OR'd together — one pair per
+# distinct color cluster the "red" target ball can show the camera.
+# A single-color ball needing hue-wrap (e.g. true red, which sits at both
+# ends of OpenCV's 0-180 hue range) needs two pairs; a multi-color practice
+# ball (e.g. a red/yellow/green ball, used when a real red ball isn't
+# available) needs one pair per visible color so detection doesn't depend
+# on which face happens to be toward the camera. auto_calibrate_hsv.py
+# derives this list automatically via hue clustering against labeled
+# ground truth — re-run it whenever the practice ball or lighting changes.
+#
+# Values below derived from video_3/video_5's labeled ground truth (indoor
+# basketball footage, NOT the Pi's camera/lighting) — treat as a starting
+# point and re-calibrate against real Pi-camera/water footage once available.
+RED_HSV_RANGES = [
+    ((0, 165, 109), (9, 255, 255)),
+    ((170, 165, 109), (180, 255, 255)),
+]
 
 COLORED_HSV_LOWER = (20, 100, 100)   # example: yellow-ish ball — retune on-site
 COLORED_HSV_UPPER = (35, 255, 255)
@@ -801,10 +809,7 @@ class BallVision:
     def __init__(self, config):
         self.config = config
         self._red = _SingleBallTracker(
-            hsv_ranges=[
-                (config.RED_HSV_LOWER1, config.RED_HSV_UPPER1),
-                (config.RED_HSV_LOWER2, config.RED_HSV_UPPER2),
-            ],
+            hsv_ranges=list(config.RED_HSV_RANGES),
             min_radius_px=config.MIN_BALL_RADIUS_PX,
             min_color_match_fraction=config.MIN_COLOR_MATCH_FRACTION,
         )

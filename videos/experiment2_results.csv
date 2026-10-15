@@ -1,0 +1,9 @@
+condition,n_labeled_frames,hit_rate_pct,false_positive_rate_pct,mean_error_px
+Midday on water,110,87.3,16.1,15.3
+Midday on water,65,98.3,0.0,45.2
+Midday on water,28,100.0,0.0,105.0
+Midday on water,53,96.9,9.5,10.0
+Low light,56,97.8,10.0,46.5
+Higher speed,238,98.7,0.0,43.3
+Higher speed,62,98.1,0.0,31.6
+Higher speed,34,100.0,100.0,547.9

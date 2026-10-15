@@ -1,0 +1,6 @@
+condition,video,labels_csv
+Calm water shaded,path/to/calm_shaded.mp4,path/to/calm_shaded_labels.csv
+Direct sun glare,path/to/glare.mp4,path/to/glare_labels.csv
+Boat wake / ripples,path/to/wake.mp4,path/to/wake_labels.csv
+Partial occlusion,path/to/occlusion.mp4,path/to/occlusion_labels.csv
+Fast-moving target,path/to/fast.mp4,path/to/fast_labels.csv
