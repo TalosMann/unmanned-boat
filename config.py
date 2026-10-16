@@ -87,9 +87,11 @@ FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 
 # --- Thrusters (motor_control.MotorController, gpiozero + bidirectional ESCs) ---
+# Both CONFIRMED wired, per pi_controller_spec.md and the follow-up confirmation:
+# right ESC on physical pins 35 (signal, BCM19) / 39 (ground); left ESC on the
+# other pair, physical pins 32 (signal, BCM12) / 34 (ground).
 LEFT_THRUSTER_PIN = 12    # BCM GPIO number, not physical pin. BCM12 = physical pin 32
-                          # (matches the single ESC currently wired to physical pin 32/34)
-RIGHT_THRUSTER_PIN = 19  # BCM19 = physical pin 35 — not yet wired to a second ESC
+RIGHT_THRUSTER_PIN = 19   # BCM19 = physical pin 35
 ESC_NEUTRAL_US = 1500     # standard RC pulse widths: 1000=full reverse, 1500=stop, 2000=full forward
 ESC_MIN_US = 1000
 ESC_MAX_US = 2000
@@ -105,15 +107,12 @@ SHOOT_BURST_SEC = 0.5     # duration of full-power burst on shoot() — the pre-
 
 # --- Kicker (motor_control.MotorController, PCA9685-driven servo) ---
 # Per pi_controller_spec.md: PCA9685 over I2C, not a Pi GPIO pin — see
-# pca9685.py. Values below are CONSERVATIVE PLACEHOLDERS — the brief notes
-# the servo is rated ~500-2500us over 180 degrees but says to verify
-# against its datasheet; starting near-center and with a modest excursion
-# rather than the full rated range until that's confirmed safe.
+# pca9685.py. Retract/kick values confirmed against the real servo
+# (~65-degree swing); KICKER_PCA_CHANNEL is still a placeholder.
 KICKER_PCA_I2C_ADDRESS = 0x40   # PCA9685 default address (confirmed free, no BNO055 conflict at 0x28)
 KICKER_PCA_CHANNEL = 0          # which PCA9685 output the servo is wired to — PLACEHOLDER, confirm
-KICKER_RETRACT_US = 1500        # rest/retracted position — conservative mid-range placeholder
-KICKER_KICK_US = 1900           # kick position — modest excursion from center, not the full
-                                 # rated extreme, until the servo's real range is confirmed
+KICKER_RETRACT_US = 1100        # CONFIRMED against the real servo
+KICKER_KICK_US = 1820           # CONFIRMED — ~65-degree swing from retract
 KICKER_KICK_HOLD_SEC = 0.3      # how long to hold the kick position before retracting
 
 # --- Thruster inversion (motor_control.MotorController) ---
